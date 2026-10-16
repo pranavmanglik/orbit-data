@@ -1,10 +1,12 @@
 # Orbit Data: development
 
-This package declares support for `>=3.11,<3.15` in `pyproject.toml`. That declaration is distinct from evidence that hosted CI ran.
+The contract package is intentionally dependency-free at runtime. Changes here affect multiple
+capability and provider packages, so keep the shared API small, typed, and explicit about its
+behavioral guarantees.
 
-Use the checks for each language manifest present in this repository:
+## Local setup and checks
 
-### Python package
+From the repository root:
 
 ```bash
 python -m pip install -e '.[dev]' build
@@ -12,10 +14,27 @@ pytest
 ruff check src tests
 ruff format --check src tests
 mypy
+python -m build
 ```
 
-Optional SDKs and live-service tests are described by the package README. Do not run an opt-in live test against a shared or production service unless its own documentation explicitly supports that use.
+The protocol tests use in-process fixtures and need no database or network service. These checks
+verify this package's shape and typing; they do not prove that provider implementations meet the
+contract or that transaction behavior is correct against a live database.
 
-## Contribution expectations
+## Changing a public contract
 
-Add focused regression coverage for behavior changes. Update the README and relevant guide when a contract, configuration option, security property, lifecycle rule, or operational assumption changes. Report the exact versions and services exercised; local checks do not imply hosted CI or release validation.
+Before adding a method or changing a signature, inspect all capability and provider consumers in
+the workspace. State which behavioral guarantees are required for every conforming implementation
+and which remain implementation-defined. Prefer provider-neutral terms and Python standard types;
+do not add driver dependencies here.
+
+Add tests for runtime protocol structure and supported public exports, and coordinate any behavior
+change with the affected adapters. Update the README, architecture and operations guides, docstrings,
+and release notes when the contract changes. Because this project is alpha, incompatible API
+changes are possible, but they still need clear migration guidance for workspace consumers.
+
+## Contribution practices
+
+Follow [CONTRIBUTING.md](../../CONTRIBUTING.md), the code of conduct, and project governance. Keep
+examples runnable, explain security-sensitive behavior, and distinguish local validation from
+hosted CI or release verification. Do not include real credentials or production data in fixtures.

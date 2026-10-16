@@ -28,7 +28,7 @@ generation, query filtering, or repository discovery. Implementations must docum
 
 ## Status
 
-This package is pre-alpha; its API is not stable and it is not yet a published release. It supports
+This package is alpha; its API is not stable and it is not yet a published release. It supports
 Python 3.11 through 3.14.
 
 ## Documentation

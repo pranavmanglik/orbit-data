@@ -1,48 +1,45 @@
-# Orbit Data: operations and security
+# Orbit Data: operations
 
-This guide organizes runtime behavior documented by the package. It does not certify production readiness. Verify provider/client versions, permissions, transport security, limits, and failure behavior in the target environment before release.
+`orbit-data` is a contracts-only package. It creates no connections, reads no environment
+variables, and owns no runtime resources. Operational configuration belongs to the selected
+capability and provider packages.
 
-## Configuration surface
+## Selecting an implementation
 
-Environment names found in the package README:
+Install `orbit-data` to type against the shared repository boundary. Applications that persist
+data also install a capability and a provider that implement it, for example `orbit-sql` with
+`orbit-sql-sqlite`, `orbit-sql-mysql`, or `orbit-sql-postgres`. A NoSQL application selects
+`orbit-nosql` and an implementation such as `orbit-nosql-mongo`. These are separately installed
+packages; installing this contracts package does not install them.
 
-The package README does not name `ORBIT_*` variables. Use its typed constructors and application configuration, and confirm exact runtime inputs in the implementation before deployment.
+The implementation documentation must describe connection pool sizing, timeouts, TLS, credential
+loading and rotation, transaction isolation, retry rules, shutdown behavior, and any provider
+limits. Do not assume these settings are uniform merely because repositories share this API.
 
-Use the package README's constructor and deployment examples. Store credentials in a secret manager and avoid logging credentials, raw provider errors, request data, or opaque cursors.
+## Resource and transaction ownership
 
-## Lifecycle, failure behavior, and limits
+This package does not create a resource lifecycle. Follow the concrete provider's ownership rules
+and close pools/clients during application shutdown, commonly through Core's managed resource
+support. Keep repository objects returned from a `UnitOfWork` inside that context. The protocol
+expects rollback for body failures and cancellation, commit on normal exit, and resource cleanup
+even if commit fails. Verify concrete adapters meet those expectations and document any known
+limitations.
 
-`orbit-data` defines provider-neutral repository and unit-of-work contracts for Orbit applications.
-It contains no database driver, SQL dialect, connection pool, or persistence implementation and has
-no runtime dependency on Orbit Core.
+## Scale and consistency boundaries
 
-The package exposes typed `Repository[Entity, Key]` and `UnitOfWork` protocols. `orbit-sql` owns the
-provider-neutral SQL contract and implements repositories and unit-of-work behavior on it. Provider
-adapters such as `orbit-sql-sqlite`, `orbit-sql-mysql`, and `orbit-sql-postgres` supply connections
-without changing repository-facing APIs.
+`Repository.list(limit=...)` is one bounded read, not a page-token API. Its ordering is undefined at
+the shared contract level, and separate calls do not share a snapshot. Implementations should cap
+the requested limit and document their ordering. Use a provider's bulk export or streaming feature
+for large datasets; do not build an unbounded export by repeatedly calling this method and assuming
+stable pagination.
 
-```bash
-pip install orbit-data
-```
+The shared protocols do not promise isolation, durability, cross-provider consistency, or
+exactly-once execution. Those guarantees depend on the selected backend, schema, transaction
+configuration, and application retry behavior.
 
-Install `orbit-sql` plus a provider package when an application needs SQL. The SQL capability may
-integrate with Core's container lifecycle, but the shared data repository contracts are independent
-of Core.
+## Pre-release operational review
 
-The repository contract provides `get`, bounded `list`, `add`, `update`, and `delete`. Missing reads
-return `None`; update/delete report whether they affected a row; writes that violate a uniqueness
-constraint raise `RepositoryConflictError`, without exposing driver messages or stored values. A
-unit of work is an async context that commits on normal exit and rolls back on exceptions or
-cancellation. Repositories obtained from it must not outlive that context.
-
-The contracts intentionally do not prescribe object-relational mapping, schema migrations, identity
-generation, query filtering, or repository discovery. Implementations must document those choices.
-
-## Status
-
-This package is pre-alpha; its API is not stable and it is not yet a published release. It supports
-Python 3.11 through 3.14.
-
-## Production validation
-
-Validate startup/shutdown cleanup, timeout and cancellation behavior, concurrency and payload bounds where applicable, secret rotation and least-privilege access, data durability, backup/restore, and failover against the selected provider. Do not infer distributed or durable guarantees from an in-process API or fake-client tests.
+For each selected provider, verify failure recovery, pool cleanup, cancellation during active work,
+transaction rollback and commit failure, backup/restore, schema migration, connection exhaustion,
+and behavior under the target database version. This repository's contract tests alone cannot
+provide that evidence.

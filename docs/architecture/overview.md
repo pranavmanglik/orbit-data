@@ -1,58 +1,71 @@
 # Orbit Data: architecture and boundaries
 
-## Responsibility
+`orbit-data` owns the shared repository and unit-of-work protocols used by data access
+capabilities. It contains no database driver, object mapper, connection pool, SQL dialect, or
+provider configuration, and it does not depend on Orbit Core.
 
-`orbit-data` defines provider-neutral repository and unit-of-work contracts for Orbit applications.
-It contains no database driver, SQL dialect, connection pool, or persistence implementation and has
-no runtime dependency on Orbit Core.
-
-The package exposes typed `Repository[Entity, Key]` and `UnitOfWork` protocols. `orbit-sql` owns the
-provider-neutral SQL contract and implements repositories and unit-of-work behavior on it. Provider
-adapters such as `orbit-sql-sqlite`, `orbit-sql-mysql`, and `orbit-sql-postgres` supply connections
-without changing repository-facing APIs.
-
-```bash
-pip install orbit-data
+```text
+application module
+       │ Repository[Entity, Key] / UnitOfWork
+       ▼
+   orbit-data                 shared repository and transaction-scope contracts
+       ▲
+       │ depends on contracts
+   orbit-sql / orbit-nosql    capability-specific APIs and behavior
+       ▲
+       │ provider implementation
+ orbit-sql-sqlite, -mysql, -postgres, orbit-nosql-mongo, ...
 ```
 
-Install `orbit-sql` plus a provider package when an application needs SQL. The SQL capability may
-integrate with Core's container lifecycle, but the shared data repository contracts are independent
-of Core.
+Providers own their SDKs, connections, credentials, error translation, and resource lifecycle.
+Capabilities own interfaces that are common across providers in their domain. Core may compose
+these resources through its container, but the data contracts remain independently importable.
 
-The repository contract provides `get`, bounded `list`, `add`, `update`, and `delete`. Missing reads
-return `None`; update/delete report whether they affected a row; writes that violate a uniqueness
-constraint raise `RepositoryConflictError`, without exposing driver messages or stored values. A
-unit of work is an async context that commits on normal exit and rolls back on exceptions or
-cancellation. Repositories obtained from it must not outlive that context.
+## Repository contract
 
-The contracts intentionally do not prescribe object-relational mapping, schema migrations, identity
-generation, query filtering, or repository discovery. Implementations must document those choices.
+`Repository[Entity, Key]` defines `get`, `list`, `add`, `update`, and `delete`:
 
-## Declared dependencies
+- `get` returns `None` when a key is absent.
+- `list(limit=...)` returns a bounded tuple for one call. The contract does not define ordering,
+  filtering, cursor pagination, or a snapshot across calls. It is not a bulk export API. Concrete
+  implementations must document ordering and a finite accepted limit range.
+- `add` inserts without mutating the caller's entity. A uniqueness conflict is translated to
+  `RepositoryConflictError` without exposing backend messages or record data.
+- `update` and `delete` return `False` when no existing record was affected. The contract does not
+  prescribe key generation, soft-delete behavior, cascades, or retention.
 
-The following dependency declarations come from the checked-in manifests. Optional groups and development dependencies are called out separately.
+The entity and key are application types. This API intentionally does not prescribe a data model,
+ORM, serialization format, filtering language, schema version, or identity strategy. It also does
+not promise that operations outside a unit of work are transactional.
 
-### `pyproject.toml`
-- No dependencies declared.
-- Optional `dev` group: `pytest>=8,<10`, `ruff>=0.8,<1`, `mypy>=1.13,<2`.
+## Unit-of-work contract
 
-Declared dependencies do not mean that optional providers or services are bundled with this package.
+`UnitOfWork` is an async context-managed transaction boundary. A concrete implementation begins
+its transaction when entering, commits on normal exit, rolls back when the body raises or is
+cancelled, and releases its owned resources on every exit path. If commit fails, it should attempt
+rollback and close resources while allowing the commit failure to reach the caller. Its
+`__aexit__` must not suppress application exceptions.
 
-## Implementation layout
+Repositories acquired from a unit of work are scoped to that context and must not be retained after
+it exits. Nested transaction behavior, isolation levels, retry policy, and durability guarantees
+are provider-specific and must be described by the capability or adapter that implements them.
 
-Representative implementation files in this checkout:
+## Errors and sensitive information
 
-- `src/orbit_data/__init__.py`
-- `src/orbit_data/contracts.py`
-- `src/orbit_data/errors.py`
+`RepositoryConflictError` gives applications one provider-neutral signal for uniqueness conflicts.
+Its public message is fixed and contains no constraint name, SQL, backend message, credential, or
+entity value. Other error categories are not normalized by this package. Capability and provider
+packages should define any additional portable failures they need, and preserve the original cause
+only through a safe internal exception chain where their logging policy permits it.
 
-## Public contract and scope
+## Current source layout
 
-## Status
+- `src/orbit_data/contracts.py`: structural protocols and shared behavioral documentation.
+- `src/orbit_data/errors.py`: provider-neutral conflict exception.
+- `src/orbit_data/__init__.py`: supported top-level exports.
 
-This package is pre-alpha; its API is not stable and it is not yet a published release. It supports
-Python 3.11 through 3.14.
+## Compatibility and status
 
-## Boundary rules
-
-Keep provider SDKs, credentials, transports, and provider-specific error translation in provider adapters. Keep reusable capability contracts in the matching capability package and lifecycle orchestration in Core. Apply the relevant layer for this repository and preserve the dependency direction shown above.
+The project currently declares Python `>=3.11,<3.15` and is alpha. Public API compatibility is
+not guaranteed before a stable release. Runtime dependencies are empty; development tools are
+optional. See the repository manifest and changelog/release notes for version-specific facts.
